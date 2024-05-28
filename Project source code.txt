@@ -1,0 +1,505 @@
+APP.PY
+
+import re
+import os
+import nltk
+import joblib
+import requests
+import numpy as np
+from bs4 import BeautifulSoup
+import urllib.request as urllib
+import matplotlib.pyplot as plt
+from nltk.corpus import stopwords
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from nltk.stem import WordNetLemmatizer
+from wordcloud import WordCloud,STOPWORDS
+from flask import Flask,render_template,request
+import time
+import selenium
+from selenium.webdriver import Chrome
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+nltk.downloader.download('vader_lexicon')
+nltk.downloader.download('stopwords')
+nltk.downloader.download('wordnet')
+nltk.download('omw-1.4')
+
+app = Flask(_name_)
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
+wnl = WordNetLemmatizer()
+sia = SentimentIntensityAnalyzer()
+stop_words = stopwords.words('english')
+
+def returnytcomments(url):
+    data=[]
+
+    with Chrome(executable_path=r'D:\Abiruchi\prj sem 8\chromedriver-win64\chromedriver.exe') as driver:
+        wait = WebDriverWait(driver,15)
+        driver.get(url)
+
+        for item in range(5):
+            wait.until(EC.visibility_of_element_located((By.TAG_NAME, "body"))).send_keys(Keys.END)
+            time.sleep(2)
+
+        for comment in wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "#content"))):
+            data.append(comment.text)
+
+    return data
+
+def clean(org_comments):
+    y = []
+    for x in org_comments:
+        x = x.split()
+        x = [i.lower().strip() for i in x]
+        x = [i for i in x if i not in stop_words]
+        x = [i for i in x if len(i)>2]
+        x = [wnl.lemmatize(i) for i in x]
+        y.append(' '.join(x))
+    return y
+
+def create_wordcloud(clean_reviews):
+    # building our wordcloud and saving it
+    for_wc = ' '.join(clean_reviews)
+    wcstops = set(STOPWORDS)
+    wc = WordCloud(width=1400,height=800,stopwords=wcstops,background_color='white').generate(for_wc)
+    plt.figure(figsize=(20,10), facecolor='k', edgecolor='k')
+    plt.imshow(wc, interpolation='bicubic')
+    plt.axis('off')
+    plt.tight_layout()
+    CleanCache(directory='static/images')
+    plt.savefig('static/images/woc.png')
+    plt.close()
+
+def returnsentiment(x):
+    score =  sia.polarity_scores(x)['compound']
+
+    if score>0:
+        sent = 'Positive'
+    elif score==0:
+        sent = 'Negative'
+    else:
+        sent = 'Neutral'
+    return score,sent
+
+
+@app.route('/')
+def home():
+  # return "hello"
+    return render_template('home.html')
+
+@app.route('/results',methods=['GET'])
+def result():
+    url = request.args.get('url')
+
+    org_comments = returnytcomments(url)
+    temp = []
+
+    for i in org_comments:
+         if 5<len(i)<=500:
+            temp.append(i)
+
+    org_comments = temp
+
+    clean_comments = clean(org_comments)
+
+    create_wordcloud(clean_comments)
+
+    np,nn,nne = 0,0,0
+
+    predictions = []
+    scores = []
+
+    for i in clean_comments:
+        score,sent = returnsentiment(i)
+        scores.append(score)
+        if sent == 'Positive':
+            predictions.append('POSITIVE')
+            np+=1
+        elif sent == 'Negative':
+            predictions.append('NEGATIVE')
+            nn+=1
+        else:
+            predictions.append('NEUTRAL')
+            nne+=1
+
+    dic = []
+
+    for i,cc in enumerate(clean_comments):
+        x={}
+        x['sent'] = predictions[i]
+        x['clean_comment'] = cc
+        x['org_comment'] = org_comments[i]
+        x['score'] = scores
+        dic.append(x)
+
+    return render_template('result.html',n=len(clean_comments),nn=nn,np=np,nne=nne,dic=dic)
+
+
+@app.route('/wc')
+def wc():
+    return render_template('wc.html')
+
+
+class CleanCache:
+	'''
+	this class is responsible to clear any residual csv and image files
+	present due to the past searches made.
+	'''
+	def _init_(self, directory=None):
+		self.clean_path = directory
+		# only proceed if directory is not empty
+		if os.listdir(self.clean_path) != list():
+			# iterate over the files and remove each file
+			files = os.listdir(self.clean_path)
+			for fileName in files:
+				print(fileName)
+				os.remove(os.path.join(self.clean_path,fileName))
+		print("cleaned!")
+
+
+if _name_ == '_main_':
+    app.run(debug=True)
+
+HOME.HTML
+
+<!doctype html>
+<html lang="en">
+
+<style>
+    * {
+        padding: 0;
+        margin: 0;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    body {
+        background-image: url('static/back.png');
+        background-size: cover;
+        font-family: sans-serif;
+        background-attachment: fixed;
+        margin-top: 40px;
+        height: 100vh;
+        padding: 0;
+        margin: 0;
+    }
+
+
+    .loader {
+        display: none;
+        top: 50%;
+        left: 50%;
+        position: absolute;
+        transform: translate(-50%, -50%);
+    }
+
+    .loading {
+        border: 5px solid #ccc;
+        width: 90px;
+        height: 90px;
+        border-radius: 50%;
+        border-top-color: #61f3c5;
+        border-left-color: #61f3c5;
+        animation: spin 1s infinite ease-in;
+    }
+
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+</style>
+
+
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.5.3/dist/css/bootstrap.min.css"
+        integrity="sha384-TX8t27EcRE3e/ihU7zmQxVncDAy5uIKz4rEkgIXeMed4M0jlfIDPvg6uqKI2xXr2" crossorigin="anonymous">
+
+    <title>Reviews Sentiments...</title>
+</head>
+
+<script type="text/javascript">
+    function spinner() {
+        document.getElementsByClassName("loader")[0].style.display = "block";
+    }
+</script>
+
+
+<body>
+    <div>
+        <h1 style="text-align: center;padding-top: 15px;padding-bottom: 15px;color:whitesmoke;font-size:44px;">DECODING EMOTIONS:AN INTEGRATED FRAMEWORK FOR SENTIMENT ANALYSIS</h1>
+    </div>
+
+    <div>
+        <form action="results">
+            <div class="form-group">
+                <h2 style="text-align: center;padding-top: 77px;padding-bottom: 15px;color:bisque;font-size: 45px;">
+                    Enter the Youtube Video URL...
+                </h2>
+                <div style="margin: 0 auto;width: 60%;">
+
+                    <input type="url" class="form-control" name='url' id="url" style='border-radius:1.25rem;margin-top: 10px;
+                        margin-bottom: 30px;height: 70px;' placeholder='Please enter a valid url'>
+
+                    <div style="text-align: center" ;>
+                        <button style="width: 280px;font-size: 25px;height: 62px;border-radius: 2.25rem;" type="submit"
+                            class="btn btn-primary" onclick="spinner()">Analyze Comments</button>
+                        <div class="loader">
+                            <div class="loading"></div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </form>
+
+    </div>
+
+    <footer class='text-light bg-dark position-absolute fixed-bottom '>
+        <p class='text-center py-1 my-0'>
+            Made with ❤ by Abiruchi and Ayshwarya
+        </p>
+    </footer>
+
+    <!-- Optional JavaScript; choose one of the two! -->
+
+    <!-- Option 1: jQuery and Bootstrap Bundle (includes Popper) -->
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"
+        integrity="sha384-DfXdz2htPH0lsSSs5nCTpuj/zy4C+OGpamoFVy38MVBnE+IbbVYUew+OrCXaRkfj"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-ho+j7jyWK8fNQe+A12Hb8AhRq26LrZ/JpcUGGOn+Y7RsweNrtN/tE3MoK7ZeZDyx"
+        crossorigin="anonymous"></script>
+</body>
+
+</html>
+
+RESULT.HTML
+
+<!doctype html>
+<html lang="en">
+
+<style>
+    * {
+        padding: 0;
+        margin: 0;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    body {
+        background-image: url('static/back.png');
+        background-size: cover;
+        font-family: sans-serif;
+        background-attachment: fixed;
+        margin-top: 40px;
+        height: 100vh;
+        padding: 0;
+        margin: 0;
+    }
+
+    .card {
+        margin: 0 auto;
+        float: none;
+        margin-bottom: 10px;
+        border-radius: 2.25rem;
+        transition: 0.5s ease;
+        cursor: pointer;
+    }
+
+    .card:hover {
+        transform: scale(1.1);
+        box-shadow: rgba(0, 0, 0, 0.6);
+    }
+
+    .checked {
+        color: orange;
+    }
+</style>
+
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
+        integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <title>Review Sentiments</title>
+</head>
+
+<body>
+
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <a class="navbar-brand" href="/">Home</a>
+        <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarSupportedContent"
+            aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarSupportedContent">
+            <ul class="navbar-nav mr-auto">
+
+                <li class="nav-item">
+                    <a class="nav-link" href="/wc" target="_blank">Wordcloud</a>
+                </li>
+
+        </div>
+    </nav>
+
+
+    <div>
+        <h1 style="text-align: center;padding-top: 15px;padding-bottom: 15px;color:whitesmoke;font-size:44px;">DECODING EMOTIONS:AN INTEGRATED FRAMEWORK FOR SENTIMENT ANALYSIS</h1>
+    </div>
+
+    <div style="    text-align: center;width: 77%;margin: 0 auto;">
+        <h2 style='background-color: antiquewhite;
+        font-size: 29px;
+        border-radius: 1.25rem;
+        padding: 10px;'><b>Following are the top {{ n }} comments on the Video...</b></h2>
+    </div>
+
+    <div class='row'>
+        <div class='col-md-4'
+            style='text-align: center;width: 57%;margin: 0 auto;border-radius: 2.25rem;margin-top: 30px;'>
+            <p
+                style='padding-top: 5px;padding-bottom: 5px;border-radius: 1.25rem;width: 70%;background-color: palegreen;font-weight: bold;margin: 0 auto;'>
+                POSITIVE REVIEWS -->{{np}}/{{n}}</p>
+        </div>
+
+        <div class='col-md-4'
+            style='text-align: center;width: 57%;margin: 0 auto;border-radius: 2.25rem;margin-top: 30px;'>
+            <p
+                style="padding-top: 5px;padding-bottom: 5px;width: 70%;background-color: grey;font-weight: bold;margin: 0 auto;border-radius: 1.25rem;">
+                NEUTRAL REVIEWS --> {{nne}}/{{n}}</p>
+        </div>
+
+        <div class='col-md-4'
+            style='text-align: center;width: 57%;margin: 0 auto;border-radius: 2.25rem;margin-top: 30px;'>
+            <p
+                style="padding-top: 5px;padding-bottom: 5px;width: 70%;background-color: indianred;font-weight: bold;margin: 0 auto;border-radius: 1.25rem;">
+                NEGATIVE REVIEWS --> {{nn}}/{{n}}</p>
+        </div>
+    </div>
+
+
+    {% for obj in dic %}
+    <div class="card my-5 " style="max-width: 1000px;">
+        <div class="row" style='align-items:center'>
+            <div class="col-md-12">
+                {% if obj['sent'] =='POSITIVE' %}
+                <div class="card-body" style="background-color:palegreen;">
+                    <p class="card-text" style="font-size:20px;">{{ obj['org_comment'] }} </p>
+                </div>
+                {% endif %}
+
+                {% if obj['sent'] =='NEUTRAL' %}
+                <div class="card-body" style="background-color:grey;">
+                    <p class="card-text" style="font-size:20px;">{{ obj['org_comment'] }} </p>
+                </div>
+                {% endif %}
+
+                {% if obj['sent'] =='NEGATIVE' %}
+                <div class="card-body" style="background-color:indianred;">
+                    <p class="card-text" style="font-size:20px;">{{ obj['org_comment'] }} </p>
+                </div>
+                {% endif %}
+
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+
+
+    <footer class='text-light bg-dark position-relative '>
+        <p class='text-center py-1 my-0'>
+            Made with ❤ by Abiruchi and Ayshwarya
+        </p>
+    </footer>
+
+
+    <!-- Optional JavaScript -->
+    <!-- jQuery first, then Popper.js, then Bootstrap JS -->
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"
+        integrity="sha384-DfXdz2htPH0lsSSs5nCTpuj/zy4C+OGpamoFVy38MVBnE+IbbVYUew+OrCXaRkfj"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"
+        integrity="sha384-9/reFTGAW83EW2RDu2S0VKaIzap3H66lZH81PoYlFhbGU+6BZp6G7niu735Sk7lN"
+        crossorigin="anonymous"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"
+        integrity="sha384-B4gt1jrGC7Jh4AgTPSdUtOBvfO8shuf57BaghqFfPlYxofvL8/KUEfYiJOMMV+rV"
+        crossorigin="anonymous"></script>
+</body>
+
+</html>
+
+WC.HTML
+
+<!doctype html>
+<html lang="en">
+
+<style>
+    * {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    body,
+    html {
+        height: 100%;
+    }
+
+    .bg {
+        background-image: url("static/images/woc.png");
+        height: 100%;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-size: cover;
+    }
+</style>
+
+
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+        integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+
+    <title> Wordcloud </title>
+</head>
+
+<body>
+
+    <div class="bg"></div>
+
+
+    <!-- Optional JavaScript -->
+    <!-- jQuery first, then Popper.js, then Bootstrap JS -->
+    <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js"
+        integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo"
+        crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"
+        integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1"
+        crossorigin="anonymous"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"
+        integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM"
+        crossorigin="anonymous"></script>
+</body>
+
+</html>
